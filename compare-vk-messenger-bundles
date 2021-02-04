@@ -1,0 +1,126 @@
+#!/bin/sh
+# SPDX-License-Identifier: BSD-2-Clause
+
+set -e
+shopt -s nullglob
+
+PROGPATH="$0"
+
+usage() {
+    echo "$PROGPATH <OPTIONS>"
+    echo
+    echo "Options:"
+    echo "    -o: output dir"
+    echo "    -1: first dir to compare"
+    echo "    -2: second dir to compare"
+    exit 1
+}
+
+error() {
+    echo "error: $@" >&2
+    exit 1
+}
+
+realpath() {
+    python -c "import os; print(os.path.realpath('$1'))"
+}
+
+OUTPUT_DIR=
+DIR1=
+DIR2=
+
+while :; do
+    case $1 in
+        -h|--help)
+            usage
+            ;;
+
+        -o|--output)
+            if [ -n "$2" ]; then OUTPUT_DIR="$2"; shift; else error "$1 requires an argument."; fi
+            ;;
+
+        -1)
+            if [ -n "$2" ]; then DIR1="$2"; shift; else error "$1 requires an argument."; fi
+            ;;
+
+        -2)
+            if [ -n "$2" ]; then DIR2="$2"; shift; else error "$1 requires an argument."; fi
+            ;;
+
+        --)
+            shift
+            break
+            ;;
+
+        -?*)
+            error "unknown option: %s" "$1"
+            ;;
+
+        *)
+            break
+    esac
+    shift
+done
+
+[ -z "$DIR1" ] && usage
+[ -z "$DIR2" ] && usage
+[ -z "$OUTPUT_DIR" ] && usage
+[ ! -d "$DIR1" ] && error "$DIR1 is not a directory."
+[ ! -d "$DIR2" ] && error "error: $DIR2 is not a directory."
+[ "$DIR1" == "$DIR2" ] && error "error: it's the same directory."
+[ ! -f "$DIR1/package.json" ] && error "error: package.json is not found in $DIR1."
+[ ! -f "$DIR2/package.json" ] && error "error: package.json is not found in $DIR1."
+
+[ -d "$OUTPUT_DIR" ] || mkdir "$OUTPUT_DIR"
+
+DIR1=$(realpath $DIR1)
+DIR2=$(realpath $DIR2)
+
+# find differences across all files
+# remember, diff returns 1 if differences were found
+diff -qrN "$DIR1" "$DIR2" > "$OUTPUT_DIR/recursive.txt" || true
+
+# loop through css and js
+FILES=($DIR1/*.js)
+FILES+=($DIR1/main/*.js)
+FILES+=($DIR1/app/i18n/*.js)
+FILES+=($DIR1/app/nt7/*.js)
+FILES+=($DIR1/app/lib/*.js)
+FILES+=($DIR1/dist/*.js)
+FILES+=($DIR1/dist/*.css)
+
+for f in "${FILES[@]}"; do
+    # remove prefix $DIR1/ from $f
+    _wo_path=${f#"$DIR1/"}
+    _dirname=$(dirname $_wo_path)
+
+    # compare files
+    _md5_1=$(md5 -q "$DIR1/$_wo_path")
+    _md5_2=$(md5 -q "$DIR2/$_wo_path")
+    if [ "$_md5_1" == "$_md5_2" ]; then
+        echo "no difference: $_wo_path"
+        continue
+    fi
+
+    if [ "$_dirname" != "." ]; then
+        mkdir -p "$OUTPUT_DIR/$_dirname"
+    fi
+
+    echo "processing: $_wo_path"
+
+    # beautify files and generate diff
+    if [[ $f == *.js ]]; then
+        _beautify=js-beautify
+        _ext=js
+    elif [[ $f == *.css ]]; then
+        _beautify=css-beautify
+        _ext=css
+    fi
+
+    $_beautify "$DIR1/$_wo_path" > "$OUTPUT_DIR/${_wo_path/.$_ext/-1.$_ext}"
+    $_beautify "$DIR2/$_wo_path" > "$OUTPUT_DIR/${_wo_path/.$_ext/-2.$_ext}"
+    git diff "$OUTPUT_DIR/${_wo_path/.$_ext/-1.$_ext}" "$OUTPUT_DIR/${_wo_path/.$_ext/-2.$_ext}" > "$OUTPUT_DIR/$_wo_path.diff" || true
+    rm "$OUTPUT_DIR/${_wo_path/.$_ext/-1.$_ext}" "$OUTPUT_DIR/${_wo_path/.$_ext/-2.$_ext}"
+done
+
+echo "done, saved to $OUTPUT_DIR"

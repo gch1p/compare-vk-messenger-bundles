@@ -1,0 +1,18 @@
+compare-vk-messenger-bundles is a tool that helps to find changes between 
+VK Desktop Messenger builds. it compares js and css files and saves diff for
+future inspection.
+
+
+USAGE
+
+compare-vk-messenger-bundles <OPTIONS>
+
+Options:
+    -o: output dir
+    -1: first dir to compare
+    -2: second dir to compare
+
+
+LICENSE
+
+BSD-2c
